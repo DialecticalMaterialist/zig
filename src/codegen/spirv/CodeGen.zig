@@ -1417,6 +1417,8 @@ fn resolveType(cg: *CodeGen, ty: Type, repr: Repr) Error!Id {
                     .spirv_fragment,
                     .spirv_vertex,
                     .spirv_device,
+                    .spirv_task,
+                    .spirv_mesh,
                     => {},
                     else => unreachable,
                 }

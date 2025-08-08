@@ -174,7 +174,7 @@ fn processInstruction(ass: *Assembler) !void {
         .OpExtension => {
             const ext_name_offset = ass.inst.operands.items[0].string;
             const ext_name = std.mem.sliceTo(ass.inst.string_bytes.items[ext_name_offset..], 0);
-            try module.addExtension(ext_name);
+            try module.addExtension(std.meta.stringToEnum(spec.Extension, ext_name).?);
             return;
         },
         .OpExtInstImport => blk: {
