@@ -12964,7 +12964,7 @@ const PackedCallingConvention = packed struct(u18) {
                 std.builtin.CallingConvention.SpirvFragmentOptions => .{
                     .tag = tag,
                     .incoming_stack_alignment = .none, // unused
-                    .extra = @as(u4, @intFromEnum(pl.depth_assumption)) << 1 | @intFromBool(pl.pixel_centered_origin),
+                    .extra = @as(u4, @intFromEnum(pl.depth_assumption)) << 1 | @intFromBool(pl.pixel_centered_integer),
                 },
                 std.builtin.CallingConvention.SpirvMeshOptions => .{
                     .tag = tag,

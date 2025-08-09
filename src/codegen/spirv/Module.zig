@@ -349,7 +349,7 @@ fn entryPoints(module: *Module) !Section {
                 });
             },
             .spirv_fragment => |fragment| {
-                if (fragment.pixel_centered_integer) {
+                if (fragment.pixel_centered_integer and target.os.tag != .vulkan) {
                     try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
                         .entry_point = entry_point_id,
                         .mode = .pixel_center_integer,
