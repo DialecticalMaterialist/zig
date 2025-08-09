@@ -346,13 +346,15 @@ pub const CallingConvention = union(enum(u8)) {
     nvptx_device,
     nvptx_kernel,
 
-    // Calling conventions for kernels and shaders on the `spirv`, `spirv32`, and `spirv64` architectures.
+    // Calling conventions for kernels and shaders on the `spirv32`, and `spirv64` architectures.
     spirv_device,
-    spirv_kernel,
+    spirv_kernel: SpirvKernelOptions,
     spirv_fragment,
     spirv_vertex,
     spirv_task,
     spirv_mesh: SpirvMeshOptions,
+
+    pub const SpirvKernelOptions = struct { x: u32, y: u32, z: u32 };
 
     pub const SpirvMeshOptions = struct {
         const StageOutput = enum(u2) {
@@ -362,8 +364,8 @@ pub const CallingConvention = union(enum(u8)) {
         };
 
         stage_output: StageOutput = .output_triangles,
-        max_primitives: u5 = 1,
-        max_vertices: u6 = 3,
+        max_primitives: u32 = 1,
+        max_vertices: u32 = 3,
     };
 
     /// Options shared across most calling conventions.

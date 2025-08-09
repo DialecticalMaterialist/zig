@@ -130,14 +130,9 @@ pub const Decl = struct {
     end_dep: usize = 0,
 };
 
-/// This models a kernel entry point.
 pub const EntryPoint = struct {
-    /// The declaration that should be exported.
     decl_index: Decl.Index,
-    /// The name of the kernel to be exported.
     name: []const u8,
-    /// Calling Convention
-    exec_model: spec.ExecutionModel,
     cc: std.builtin.CallingConvention,
 };
 
@@ -300,6 +295,8 @@ pub fn addEntryPointDeps(
 }
 
 fn entryPoints(module: *Module) !Section {
+    const target = module.zcu.getTarget();
+
     var entry_points = Section{};
     errdefer entry_points.deinit(module.gpa);
 
@@ -313,15 +310,44 @@ fn entryPoints(module: *Module) !Section {
         interface.items.len = 0;
         seen.setRangeValue(.{ .start = 0, .end = module.decls.items.len }, false);
 
+        const exec_model: spec.ExecutionModel = switch (target.os.tag) {
+            .vulkan, .opengl => switch (entry_point.cc) {
+                .spirv_vertex => .vertex,
+                .spirv_fragment => .fragment,
+                .spirv_kernel => .gl_compute,
+                .spirv_task => .task_ext,
+                .spirv_mesh => .mesh_ext,
+                // TODO: We should integrate with the Linkage capability and export this function
+                .spirv_device => unreachable,
+                else => unreachable,
+            },
+            .opencl => switch (entry_point.cc) {
+                .spirv_kernel => .kernel,
+                // TODO: We should integrate with the Linkage capability and export this function
+                .spirv_device => unreachable,
+                else => unreachable,
+            },
+            else => unreachable,
+        };
         try module.addEntryPointDeps(entry_point.decl_index, &seen, &interface);
         try entry_points.emit(module.gpa, .OpEntryPoint, .{
-            .execution_model = entry_point.exec_model,
+            .execution_model = exec_model,
             .entry_point = entry_point_id,
             .name = entry_point.name,
             .interface = interface.items,
         });
 
         switch (entry_point.cc) {
+            .spirv_kernel => |kernel| {
+                try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                    .entry_point = entry_point_id,
+                    .mode = .{ .local_size = .{
+                        .x_size = kernel.x,
+                        .y_size = kernel.y,
+                        .z_size = kernel.z,
+                    } },
+                });
+            },
             .spirv_mesh => |mesh| {
                 try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
                     .entry_point = entry_point_id,
@@ -913,13 +939,11 @@ pub fn declareEntryPoint(
     module: *Module,
     decl_index: Decl.Index,
     name: []const u8,
-    exec_model: spec.ExecutionModel,
     cc: std.builtin.CallingConvention,
 ) !void {
     const gop = try module.entry_points.getOrPut(module.gpa, module.declPtr(decl_index).result_id);
     gop.value_ptr.decl_index = decl_index;
     gop.value_ptr.name = name;
-    gop.value_ptr.exec_model = exec_model;
     gop.value_ptr.cc = cc;
 }
 

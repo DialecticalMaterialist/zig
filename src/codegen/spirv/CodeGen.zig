@@ -2503,13 +2503,11 @@ fn generateTestEntryPoint(
     // point name is the same as a different OpName.
     const test_name = try std.fmt.allocPrint(cg.module.arena, "test {s}", .{name});
 
-    const execution_model: spec.ExecutionModel = switch (target.os.tag) {
-        .vulkan, .opengl => .gl_compute,
-        .opencl, .amdhsa => .kernel,
-        else => unreachable,
-    };
-
-    try cg.module.declareEntryPoint(spv_decl_index, test_name, execution_model, .spirv_kernel);
+    try cg.module.declareEntryPoint(
+        spv_decl_index,
+        test_name,
+        .{ .spirv_kernel = .{ .x = 1, .y = 1, .z = 1 } },
+    );
 }
 
 fn intFromBool(cg: *CodeGen, value: Temporary) !Temporary {

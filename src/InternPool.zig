@@ -4871,12 +4871,19 @@ pub const Index = enum(u32) {
         type_function: struct {
             const @"data.flags.has_comptime_bits" = opaque {};
             const @"data.flags.has_noalias_bits" = opaque {};
+            const @"data.flags.cc_extra_len" = opaque {};
             const @"data.params_len" = opaque {};
             data: *Tag.TypeFunction,
             @"trailing.comptime_bits.len": *@"data.flags.has_comptime_bits",
             @"trailing.noalias_bits.len": *@"data.flags.has_noalias_bits",
+            @"trailing.cc_bits.len": *@"data.flags.cc_extra_len",
             @"trailing.param_types.len": *@"data.params_len",
-            trailing: struct { comptime_bits: []u32, noalias_bits: []u32, param_types: []Index },
+            trailing: struct {
+                comptime_bits: []u32,
+                noalias_bits: []u32,
+                cc_bits: []u32,
+                param_types: []Index,
+            },
         },
 
         undef: DataIsIndex,
@@ -5813,6 +5820,7 @@ pub const Tag = enum(u8) {
             .trailing = struct {
                 param_comptime_bits: ?[]u32,
                 param_noalias_bits: ?[]u32,
+                param_cc_bits: ?[]u32,
                 param_type: []Index,
             },
             .config = .{
@@ -5820,6 +5828,8 @@ pub const Tag = enum(u8) {
                 .@"trailing.param_comptime_bits.?.len" = .@"(payload.params_len + 31) / 32",
                 .@"trailing.param_noalias_bits.?" = .@"payload.flags.has_noalias_bits",
                 .@"trailing.param_noalias_bits.?.len" = .@"(payload.params_len + 31) / 32",
+                .@"trailing.param_cc_bits.?" = .@"payload.flags.cc_extra_len != 0",
+                .@"trailing.param_cc_bits.?.len" = .@"payload.flags.cc_extra_len",
                 .@"trailing.param_type.len" = .@"payload.params_len",
             },
         },
@@ -6023,7 +6033,11 @@ pub const Tag = enum(u8) {
     /// Trailing:
     /// 0. comptime_bits: u32, // if has_comptime_bits
     /// 1. noalias_bits: u32, // if has_noalias_bits
-    /// 2. param_type: Index for each params_len
+    /// 2. if cc.tag == .spirv_mesh
+    ///    cc_bits: u32
+    ///    if cc.tag == .spirv_kernel
+    ///    cc_bits: [3]u32
+    /// 3. param_type: Index for each params_len
     pub const TypeFunction = struct {
         params_len: u32,
         return_type: Index,
@@ -6035,7 +6049,9 @@ pub const Tag = enum(u8) {
             is_generic: bool,
             has_comptime_bits: bool,
             has_noalias_bits: bool,
+            cc_extra_len: u2,
             is_noinline: bool,
+            _: u7 = 0,
         };
     };
 
@@ -7474,6 +7490,20 @@ fn extraFuncType(tid: Zcu.PerThread.Id, extra: Local.Extra, extra_index: u32) Ke
         trail_index += 1;
         break :b x;
     };
+    var cc = type_function.data.flags.cc.unpack();
+    switch (cc) {
+        .spirv_kernel => |*kernel| {
+            kernel.x = extra.view().items(.@"0")[trail_index];
+            kernel.y = extra.view().items(.@"0")[trail_index + 1];
+            kernel.z = extra.view().items(.@"0")[trail_index + 2];
+        },
+        .spirv_mesh => |*mesh| {
+            mesh.max_primitives = extra.view().items(.@"0")[trail_index];
+            mesh.max_vertices = extra.view().items(.@"0")[trail_index + 1];
+        },
+        else => {},
+    }
+    trail_index += type_function.data.flags.cc_extra_len;
     return .{
         .param_types = .{
             .tid = tid,
@@ -7483,7 +7513,7 @@ fn extraFuncType(tid: Zcu.PerThread.Id, extra: Local.Extra, extra_index: u32) Ke
         .return_type = type_function.data.return_type,
         .comptime_bits = comptime_bits,
         .noalias_bits = noalias_bits,
-        .cc = type_function.data.flags.cc.unpack(),
+        .cc = cc,
         .is_var_args = type_function.data.flags.is_var_args,
         .is_noinline = type_function.data.flags.is_noinline,
         .is_generic = type_function.data.flags.is_generic,
@@ -9109,11 +9139,17 @@ pub fn getFuncType(
     // ask if it already exists, and if so, revert the lengths of the mutated
     // arrays. This is similar to what `getOrPutTrailingString` does.
     const prev_extra_len = extra.mutate.len;
+    const cc_extra_len: u2 = if (key.cc) |cc| switch (cc) {
+        .spirv_kernel => 3,
+        .spirv_mesh => 2,
+        else => 0,
+    } else 0;
     const params_len: u32 = @intCast(key.param_types.len);
 
     try extra.ensureUnusedCapacity(@typeInfo(Tag.TypeFunction).@"struct".fields.len +
         @intFromBool(key.comptime_bits != 0) +
         @intFromBool(key.noalias_bits != 0) +
+        cc_extra_len +
         params_len);
 
     const func_type_extra_index = addExtraAssumeCapacity(extra, Tag.TypeFunction{
@@ -9124,6 +9160,7 @@ pub fn getFuncType(
             .is_var_args = key.is_var_args,
             .has_comptime_bits = key.comptime_bits != 0,
             .has_noalias_bits = key.noalias_bits != 0,
+            .cc_extra_len = cc_extra_len,
             .is_generic = key.is_generic,
             .is_noinline = key.is_noinline,
         },
@@ -9131,6 +9168,18 @@ pub fn getFuncType(
 
     if (key.comptime_bits != 0) extra.appendAssumeCapacity(.{key.comptime_bits});
     if (key.noalias_bits != 0) extra.appendAssumeCapacity(.{key.noalias_bits});
+    if (key.cc) |cc| switch (cc) {
+        .spirv_kernel => |kernel| extra.appendSliceAssumeCapacity(.{&.{
+            kernel.x,
+            kernel.y,
+            kernel.z,
+        }}),
+        .spirv_mesh => |mesh| extra.appendSliceAssumeCapacity(.{&.{
+            mesh.max_primitives,
+            mesh.max_vertices,
+        }}),
+        else => {},
+    };
     extra.appendSliceAssumeCapacity(.{@ptrCast(key.param_types)});
     errdefer extra.mutate.len = prev_extra_len;
 
@@ -9384,6 +9433,7 @@ pub fn getFuncDeclIes(
             .is_var_args = key.is_var_args,
             .has_comptime_bits = key.comptime_bits != 0,
             .has_noalias_bits = key.noalias_bits != 0,
+            .cc_extra_len = 0,
             .is_generic = key.is_generic,
             .is_noinline = key.is_noinline,
         },
@@ -9680,6 +9730,7 @@ pub fn getFuncInstanceIes(
             .is_var_args = false,
             .has_comptime_bits = false,
             .has_noalias_bits = arg.noalias_bits != 0,
+            .cc_extra_len = 0,
             .is_generic = false,
             .is_noinline = arg.is_noinline,
         },
@@ -11174,7 +11225,8 @@ fn dumpStatsFallible(ip: *const InternPool, arena: Allocator) anyerror!void {
                     break :b @sizeOf(Tag.TypeFunction) +
                         (@sizeOf(Index) * info.params_len) +
                         (@as(u32, 4) * @intFromBool(info.flags.has_comptime_bits)) +
-                        (@as(u32, 4) * @intFromBool(info.flags.has_noalias_bits));
+                        (@as(u32, 4) * @intFromBool(info.flags.has_noalias_bits)) +
+                        (@as(u32, 4) * info.flags.cc_extra_len);
                 },
 
                 .undef => 0,
@@ -12864,12 +12916,12 @@ pub fn getErrorValueIfExists(ip: *const InternPool, name: NullTerminatedString) 
     return @intFromEnum(ip.global_error_set.getErrorValueIfExists(name) orelse return null);
 }
 
-const PackedCallingConvention = packed struct(u27) {
+const PackedCallingConvention = packed struct(u18) {
     tag: std.builtin.CallingConvention.Tag,
     /// May be ignored depending on `tag`.
     incoming_stack_alignment: Alignment,
     /// Interpretation depends on `tag`.
-    extra: u13,
+    extra: u4,
 
     fn pack(cc: std.builtin.CallingConvention) PackedCallingConvention {
         return switch (cc) {
@@ -12904,10 +12956,15 @@ const PackedCallingConvention = packed struct(u27) {
                     .incoming_stack_alignment = .fromByteUnits(pl.incoming_stack_alignment orelse 0),
                     .extra = @intFromEnum(pl.mode),
                 },
+                std.builtin.CallingConvention.SpirvKernelOptions => .{
+                    .tag = tag,
+                    .incoming_stack_alignment = .none, // unused
+                    .extra = 0, // unused
+                },
                 std.builtin.CallingConvention.SpirvMeshOptions => .{
                     .tag = tag,
-                    .incoming_stack_alignment = .none,
-                    .extra = @as(u13, pl.max_vertices) << 7 | @as(u13, pl.max_primitives) << 2 | @as(u13, @intFromEnum(pl.stage_output)),
+                    .incoming_stack_alignment = .none, // unused
+                    .extra = @intFromEnum(pl.stage_output),
                 },
                 else => comptime unreachable,
             },
@@ -12940,10 +12997,15 @@ const PackedCallingConvention = packed struct(u27) {
                         .incoming_stack_alignment = cc.incoming_stack_alignment.toByteUnits(),
                         .mode = @enumFromInt(cc.extra),
                     },
+                    std.builtin.CallingConvention.SpirvKernelOptions => .{
+                        .x = undefined, // Populated later
+                        .y = undefined, // Populated later
+                        .z = undefined, // Populated later
+                    },
                     std.builtin.CallingConvention.SpirvMeshOptions => .{
-                        .stage_output = @enumFromInt(@as(u2, @truncate(cc.extra))),
-                        .max_primitives = @truncate(cc.extra >> 2),
-                        .max_vertices = @truncate(cc.extra >> 7),
+                        .stage_output = @enumFromInt(cc.extra),
+                        .max_primitives = undefined, // Populated later
+                        .max_vertices = undefined, // Populated later
                     },
                     else => comptime unreachable,
                 },
