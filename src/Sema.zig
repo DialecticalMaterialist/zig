@@ -29853,7 +29853,8 @@ fn callconvCoerceAllowed(
             const dest_data = @field(dest_cc, @tagName(tag));
             if (@TypeOf(src_data) != void and
                 @TypeOf(src_data) != std.builtin.CallingConvention.SpirvKernelOptions and
-                @TypeOf(src_data) != std.builtin.CallingConvention.SpirvMeshOptions)
+                @TypeOf(src_data) != std.builtin.CallingConvention.SpirvMeshOptions and
+                @TypeOf(src_data) != std.builtin.CallingConvention.SpirvFragmentOptions)
             {
                 const default_stack_align = target.stackAlignment();
                 const src_stack_align = src_data.incoming_stack_alignment orelse default_stack_align;
@@ -29865,6 +29866,7 @@ fn callconvCoerceAllowed(
                 std.builtin.CallingConvention.CommonOptions,
                 std.builtin.CallingConvention.SpirvKernelOptions,
                 std.builtin.CallingConvention.SpirvMeshOptions,
+                std.builtin.CallingConvention.SpirvFragmentOptions,
                 => {},
                 std.builtin.CallingConvention.X86RegparmOptions => {
                     if (src_data.register_params != dest_data.register_params) return false;

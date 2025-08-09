@@ -11868,6 +11868,7 @@ pub fn toLlvmCallConv(cc: std.builtin.CallingConvention, target: *const std.Targ
             void,
             std.builtin.CallingConvention.SpirvKernelOptions,
             std.builtin.CallingConvention.SpirvMeshOptions,
+            std.builtin.CallingConvention.SpirvFragmentOptions,
             => .{ null, 0 },
             std.builtin.CallingConvention.ArmInterruptOptions,
             std.builtin.CallingConvention.RiscvInterruptOptions,

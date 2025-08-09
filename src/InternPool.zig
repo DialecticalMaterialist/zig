@@ -6034,8 +6034,8 @@ pub const Tag = enum(u8) {
     /// 0. comptime_bits: u32, // if has_comptime_bits
     /// 1. noalias_bits: u32, // if has_noalias_bits
     /// 2. if cc.tag == .spirv_mesh
-    ///    cc_bits: u32
-    ///    if cc.tag == .spirv_kernel
+    ///    cc_bits: [2]u32
+    ///    if cc.tag == .spirv_kernel or cc.tag == .spirv_task
     ///    cc_bits: [3]u32
     /// 3. param_type: Index for each params_len
     pub const TypeFunction = struct {
@@ -7492,7 +7492,7 @@ fn extraFuncType(tid: Zcu.PerThread.Id, extra: Local.Extra, extra_index: u32) Ke
     };
     var cc = type_function.data.flags.cc.unpack();
     switch (cc) {
-        .spirv_kernel => |*kernel| {
+        .spirv_kernel, .spirv_task => |*kernel| {
             kernel.x = extra.view().items(.@"0")[trail_index];
             kernel.y = extra.view().items(.@"0")[trail_index + 1];
             kernel.z = extra.view().items(.@"0")[trail_index + 2];
@@ -9140,7 +9140,7 @@ pub fn getFuncType(
     // arrays. This is similar to what `getOrPutTrailingString` does.
     const prev_extra_len = extra.mutate.len;
     const cc_extra_len: u2 = if (key.cc) |cc| switch (cc) {
-        .spirv_kernel => 3,
+        .spirv_kernel, .spirv_task => 3,
         .spirv_mesh => 2,
         else => 0,
     } else 0;
@@ -9169,7 +9169,7 @@ pub fn getFuncType(
     if (key.comptime_bits != 0) extra.appendAssumeCapacity(.{key.comptime_bits});
     if (key.noalias_bits != 0) extra.appendAssumeCapacity(.{key.noalias_bits});
     if (key.cc) |cc| switch (cc) {
-        .spirv_kernel => |kernel| extra.appendSliceAssumeCapacity(.{&.{
+        .spirv_kernel, .spirv_task => |kernel| extra.appendSliceAssumeCapacity(.{&.{
             kernel.x,
             kernel.y,
             kernel.z,
@@ -12961,6 +12961,11 @@ const PackedCallingConvention = packed struct(u18) {
                     .incoming_stack_alignment = .none, // unused
                     .extra = 0, // unused
                 },
+                std.builtin.CallingConvention.SpirvFragmentOptions => .{
+                    .tag = tag,
+                    .incoming_stack_alignment = .none, // unused
+                    .extra = @as(u4, @intFromEnum(pl.depth_assumption)) << 1 | @intFromBool(pl.pixel_centered_origin),
+                },
                 std.builtin.CallingConvention.SpirvMeshOptions => .{
                     .tag = tag,
                     .incoming_stack_alignment = .none, // unused
@@ -13001,6 +13006,10 @@ const PackedCallingConvention = packed struct(u18) {
                         .x = undefined, // Populated later
                         .y = undefined, // Populated later
                         .z = undefined, // Populated later
+                    },
+                    std.builtin.CallingConvention.SpirvFragmentOptions => .{
+                        .pixel_centered_integer = @bitCast(@as(u1, @truncate(cc.extra))),
+                        .depth_assumption = @enumFromInt(@as(u2, @truncate(cc.extra >> 1))),
                     },
                     std.builtin.CallingConvention.SpirvMeshOptions => .{
                         .stage_output = @enumFromInt(cc.extra),

@@ -338,7 +338,7 @@ fn entryPoints(module: *Module) !Section {
         });
 
         switch (entry_point.cc) {
-            .spirv_kernel => |kernel| {
+            .spirv_kernel, .spirv_task => |kernel| {
                 try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
                     .entry_point = entry_point_id,
                     .mode = .{ .local_size = .{
@@ -347,6 +347,39 @@ fn entryPoints(module: *Module) !Section {
                         .z_size = kernel.z,
                     } },
                 });
+            },
+            .spirv_fragment => |fragment| {
+                if (fragment.pixel_centered_integer) {
+                    try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                        .entry_point = entry_point_id,
+                        .mode = .pixel_center_integer,
+                    });
+                }
+                try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                    .entry_point = entry_point_id,
+                    .mode = if (target.os.tag) .origin_upper_left else .origin_lower_left,
+                });
+                switch (fragment.depth_assumption) {
+                    .none => {},
+                    .greater => {
+                        try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                            .entry_point = entry_point_id,
+                            .mode = .depth_greater,
+                        });
+                    },
+                    .less => {
+                        try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                            .entry_point = entry_point_id,
+                            .mode = .depth_less,
+                        });
+                    },
+                    .unchanged => {
+                        try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                            .entry_point = entry_point_id,
+                            .mode = .depth_unchanged,
+                        });
+                    },
+                }
             },
             .spirv_mesh => |mesh| {
                 try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
@@ -380,43 +413,6 @@ fn entryPoints(module: *Module) !Section {
             },
             else => {},
         }
-
-        // if (entry_point.exec_mode == null) {
-        //     switch (target.os.tag) {
-        //         .vulkan, .opengl => |tag| {
-        //             switch (entry_point.exec_model) {
-        //                 .fragment => {
-        //                     try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
-        //                         .entry_point = entry_point_id,
-        //                         .mode = if (tag == .vulkan) .origin_upper_left else .origin_lower_left,
-        //                     });
-        //                 },
-        //                 .mesh_ext => {
-        //                     try addExtension(module, .SPV_EXT_mesh_shader);
-        //                     try addCapability(module, .mesh_shading_ext);
-        //                     try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
-        //                         .entry_point = entry_point_id,
-        //                         .mode = .output_triangles_ext,
-        //                     });
-        //                     try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
-        //                         .entry_point = entry_point_id,
-        //                         .mode = .{ .output_primitives_ext = .{ .primitive_count = 1 } },
-        //                     });
-        //                     try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
-        //                         .entry_point = entry_point_id,
-        //                         .mode = .{ .output_vertices = .{ .vertex_count = 3 } },
-        //                     });
-        //                 },
-        //                 .task_ext => {
-        //                     try addExtension(module, .SPV_EXT_mesh_shader);
-        //                     try addCapability(module, .mesh_shading_ext);
-        //                 },
-        //                 else => {},
-        //             }
-        //         },
-        //         else => {},
-        //     }
-        // }
     }
 
     return entry_points;
