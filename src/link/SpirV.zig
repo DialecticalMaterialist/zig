@@ -218,7 +218,7 @@ pub fn updateExports(
                 spv_decl_index,
                 exp.opts.name.toSlice(ip),
                 exec_model,
-                null,
+                cc,
             );
         }
     }

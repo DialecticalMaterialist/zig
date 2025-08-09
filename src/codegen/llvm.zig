@@ -11865,7 +11865,7 @@ pub fn toLlvmCallConv(cc: std.builtin.CallingConvention, target: *const std.Targ
     const llvm_cc = toLlvmCallConvTag(cc, target) orelse return null;
     const incoming_stack_alignment: ?u64, const register_params: u2 = switch (cc) {
         inline else => |pl| switch (@TypeOf(pl)) {
-            void => .{ null, 0 },
+            void, std.builtin.CallingConvention.SpirvMeshOptions => .{ null, 0 },
             std.builtin.CallingConvention.ArmInterruptOptions,
             std.builtin.CallingConvention.RiscvInterruptOptions,
             std.builtin.CallingConvention.MipsInterruptOptions,

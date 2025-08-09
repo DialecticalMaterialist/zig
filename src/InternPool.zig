@@ -6036,7 +6036,6 @@ pub const Tag = enum(u8) {
             has_comptime_bits: bool,
             has_noalias_bits: bool,
             is_noinline: bool,
-            _: u9 = 0,
         };
     };
 
@@ -12865,12 +12864,12 @@ pub fn getErrorValueIfExists(ip: *const InternPool, name: NullTerminatedString) 
     return @intFromEnum(ip.global_error_set.getErrorValueIfExists(name) orelse return null);
 }
 
-const PackedCallingConvention = packed struct(u18) {
+const PackedCallingConvention = packed struct(u27) {
     tag: std.builtin.CallingConvention.Tag,
     /// May be ignored depending on `tag`.
     incoming_stack_alignment: Alignment,
     /// Interpretation depends on `tag`.
-    extra: u4,
+    extra: u13,
 
     fn pack(cc: std.builtin.CallingConvention) PackedCallingConvention {
         return switch (cc) {
@@ -12905,6 +12904,11 @@ const PackedCallingConvention = packed struct(u18) {
                     .incoming_stack_alignment = .fromByteUnits(pl.incoming_stack_alignment orelse 0),
                     .extra = @intFromEnum(pl.mode),
                 },
+                std.builtin.CallingConvention.SpirvMeshOptions => .{
+                    .tag = tag,
+                    .incoming_stack_alignment = .none,
+                    .extra = @as(u13, pl.max_vertices) << 7 | @as(u13, pl.max_primitives) << 2 | @as(u13, @intFromEnum(pl.stage_output)),
+                },
                 else => comptime unreachable,
             },
         };
@@ -12935,6 +12939,11 @@ const PackedCallingConvention = packed struct(u18) {
                     std.builtin.CallingConvention.RiscvInterruptOptions => .{
                         .incoming_stack_alignment = cc.incoming_stack_alignment.toByteUnits(),
                         .mode = @enumFromInt(cc.extra),
+                    },
+                    std.builtin.CallingConvention.SpirvMeshOptions => .{
+                        .stage_output = @enumFromInt(@as(u2, @truncate(cc.extra))),
+                        .max_primitives = @truncate(cc.extra >> 2),
+                        .max_vertices = @truncate(cc.extra >> 7),
                     },
                     else => comptime unreachable,
                 },

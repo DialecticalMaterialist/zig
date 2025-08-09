@@ -138,7 +138,7 @@ pub const EntryPoint = struct {
     name: []const u8,
     /// Calling Convention
     exec_model: spec.ExecutionModel,
-    exec_mode: ?spec.ExecutionMode = null,
+    cc: std.builtin.CallingConvention,
 };
 
 const StructType = struct {
@@ -300,8 +300,6 @@ pub fn addEntryPointDeps(
 }
 
 fn entryPoints(module: *Module) !Section {
-    const target = module.zcu.getTarget();
-
     var entry_points = Section{};
     errdefer entry_points.deinit(module.gpa);
 
@@ -323,42 +321,76 @@ fn entryPoints(module: *Module) !Section {
             .interface = interface.items,
         });
 
-        if (entry_point.exec_mode == null) {
-            switch (target.os.tag) {
-                .vulkan, .opengl => |tag| {
-                    switch (entry_point.exec_model) {
-                        .fragment => {
-                            try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
-                                .entry_point = entry_point_id,
-                                .mode = if (tag == .vulkan) .origin_upper_left else .origin_lower_left,
-                            });
-                        },
-                        .mesh_ext => {
-                            try addExtension(module, .SPV_EXT_mesh_shader);
-                            try addCapability(module, .mesh_shading_ext);
-                            try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
-                                .entry_point = entry_point_id,
-                                .mode = .output_triangles_ext,
-                            });
-                            try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
-                                .entry_point = entry_point_id,
-                                .mode = .{ .output_primitives_ext = .{ .primitive_count = 1 } },
-                            });
-                            try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
-                                .entry_point = entry_point_id,
-                                .mode = .{ .output_vertices = .{ .vertex_count = 3 } },
-                            });
-                        },
-                        .task_ext => {
-                            try addExtension(module, .SPV_EXT_mesh_shader);
-                            try addCapability(module, .mesh_shading_ext);
-                        },
-                        else => {},
-                    }
-                },
-                else => {},
-            }
+        switch (entry_point.cc) {
+            .spirv_mesh => |mesh| {
+                try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                    .entry_point = entry_point_id,
+                    .mode = .{ .output_vertices = .{ .vertex_count = mesh.max_vertices } },
+                });
+                try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                    .entry_point = entry_point_id,
+                    .mode = .{ .output_primitives_ext = .{ .primitive_count = mesh.max_primitives } },
+                });
+                switch (mesh.stage_output) {
+                    .output_points => {
+                        try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                            .entry_point = entry_point_id,
+                            .mode = .output_points,
+                        });
+                    },
+                    .output_lines => {
+                        try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                            .entry_point = entry_point_id,
+                            .mode = .output_lines_ext,
+                        });
+                    },
+                    .output_triangles => {
+                        try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+                            .entry_point = entry_point_id,
+                            .mode = .output_triangles_ext,
+                        });
+                    },
+                }
+            },
+            else => {},
         }
+
+        // if (entry_point.exec_mode == null) {
+        //     switch (target.os.tag) {
+        //         .vulkan, .opengl => |tag| {
+        //             switch (entry_point.exec_model) {
+        //                 .fragment => {
+        //                     try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+        //                         .entry_point = entry_point_id,
+        //                         .mode = if (tag == .vulkan) .origin_upper_left else .origin_lower_left,
+        //                     });
+        //                 },
+        //                 .mesh_ext => {
+        //                     try addExtension(module, .SPV_EXT_mesh_shader);
+        //                     try addCapability(module, .mesh_shading_ext);
+        //                     try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+        //                         .entry_point = entry_point_id,
+        //                         .mode = .output_triangles_ext,
+        //                     });
+        //                     try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+        //                         .entry_point = entry_point_id,
+        //                         .mode = .{ .output_primitives_ext = .{ .primitive_count = 1 } },
+        //                     });
+        //                     try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
+        //                         .entry_point = entry_point_id,
+        //                         .mode = .{ .output_vertices = .{ .vertex_count = 3 } },
+        //                     });
+        //                 },
+        //                 .task_ext => {
+        //                     try addExtension(module, .SPV_EXT_mesh_shader);
+        //                     try addCapability(module, .mesh_shading_ext);
+        //                 },
+        //                 else => {},
+        //             }
+        //         },
+        //         else => {},
+        //     }
+        // }
     }
 
     return entry_points;
@@ -882,14 +914,13 @@ pub fn declareEntryPoint(
     decl_index: Decl.Index,
     name: []const u8,
     exec_model: spec.ExecutionModel,
-    exec_mode: ?spec.ExecutionMode,
+    cc: std.builtin.CallingConvention,
 ) !void {
     const gop = try module.entry_points.getOrPut(module.gpa, module.declPtr(decl_index).result_id);
     gop.value_ptr.decl_index = decl_index;
     gop.value_ptr.name = name;
     gop.value_ptr.exec_model = exec_model;
-    // Might've been set by assembler
-    if (!gop.found_existing) gop.value_ptr.exec_mode = exec_mode;
+    gop.value_ptr.cc = cc;
 }
 
 pub fn debugName(module: *Module, target: Id, name: []const u8) !void {

@@ -352,7 +352,19 @@ pub const CallingConvention = union(enum(u8)) {
     spirv_fragment,
     spirv_vertex,
     spirv_task,
-    spirv_mesh,
+    spirv_mesh: SpirvMeshOptions,
+
+    pub const SpirvMeshOptions = struct {
+        const StageOutput = enum(u2) {
+            output_points = 0,
+            output_lines = 1,
+            output_triangles = 2,
+        };
+
+        stage_output: StageOutput = .output_triangles,
+        max_primitives: u5 = 1,
+        max_vertices: u6 = 3,
+    };
 
     /// Options shared across most calling conventions.
     pub const CommonOptions = struct {
