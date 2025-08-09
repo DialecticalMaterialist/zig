@@ -5726,6 +5726,7 @@ fn zirCImport(sema: *Sema, parent_block: *Block, inst: Zir.Inst.Index) CompileEr
             .global = comp.config,
             .parent = parent_mod,
         }) catch |err| switch (err) {
+            error.OutOfMemory => |e| return e,
             // None of these are possible because we are creating a package with
             // the exact same configuration as the parent package, which already
             // passed these checks.
@@ -5739,8 +5740,6 @@ fn zirCImport(sema: *Sema, parent_block: *Block, inst: Zir.Inst.Index) CompileEr
             error.StackCheckUnsupportedByTarget => unreachable,
             error.StackProtectorUnsupportedByTarget => unreachable,
             error.StackProtectorUnavailableWithoutLibC => unreachable,
-
-            else => |e| return e,
         };
         const c_import_file_path: Compilation.Path = try c_import_mod.root.join(gpa, comp.dirs, "cimport.zig");
         errdefer c_import_file_path.deinit(gpa);
@@ -34202,6 +34201,9 @@ pub fn resolveStructAlignment(
     if (struct_type.assumePointerAlignedIfWip(ip, ptr_align)) return;
     defer struct_type.clearAlignmentWip(ip);
 
+    // No `zcu.trackUnitSema` calls, since this phase isn't really doing any semantic analysis.
+    // It's just triggering *other* analysis, alongside a simple loop over already-resolved info.
+
     var alignment: Alignment = .@"1";
 
     for (0..struct_type.field_types.len) |i| {
@@ -34231,6 +34233,9 @@ pub fn resolveStructLayout(sema: *Sema, ty: Type) SemaError!void {
         return;
 
     try sema.resolveStructFieldTypes(ty.toIntern(), struct_type);
+
+    // No `zcu.trackUnitSema` calls, since this phase isn't really doing any semantic analysis.
+    // It's just triggering *other* analysis, alongside a simple loop over already-resolved info.
 
     if (struct_type.layout == .@"packed") {
         sema.backingIntType(struct_type) catch |err| switch (err) {
@@ -34535,6 +34540,9 @@ pub fn resolveUnionAlignment(
 
     try sema.resolveUnionFieldTypes(ty, union_type);
 
+    // No `zcu.trackUnitSema` calls, since this phase isn't really doing any semantic analysis.
+    // It's just triggering *other* analysis, alongside a simple loop over already-resolved info.
+
     var max_align: Alignment = .@"1";
     for (0..union_type.field_types.len) |field_index| {
         const field_ty: Type = .fromInterned(union_type.field_types.get(ip)[field_index]);
@@ -34581,6 +34589,9 @@ pub fn resolveUnionLayout(sema: *Sema, ty: Type) SemaError!void {
     errdefer union_type.setStatusIfLayoutWip(ip, old_flags.status);
 
     union_type.setStatus(ip, .layout_wip);
+
+    // No `zcu.trackUnitSema` calls, since this phase isn't really doing any semantic analysis.
+    // It's just triggering *other* analysis, alongside a simple loop over already-resolved info.
 
     var max_size: u64 = 0;
     var max_align: Alignment = .@"1";
@@ -34698,6 +34709,9 @@ pub fn resolveStructFully(sema: *Sema, ty: Type) SemaError!void {
     if (struct_type.setFullyResolved(ip)) return;
     errdefer struct_type.clearFullyResolved(ip);
 
+    // No `zcu.trackUnitSema` calls, since this phase isn't really doing any semantic analysis.
+    // It's just triggering *other* analysis, alongside a simple loop over already-resolved info.
+
     // After we have resolve struct layout we have to go over the fields again to
     // make sure pointer fields get their child types resolved as well.
     // See also similar code for unions.
@@ -34722,6 +34736,9 @@ pub fn resolveUnionFully(sema: *Sema, ty: Type) SemaError!void {
         .none, .have_field_types, .field_types_wip, .layout_wip, .have_layout => {},
         .fully_resolved_wip, .fully_resolved => return,
     }
+
+    // No `zcu.trackUnitSema` calls, since this phase isn't really doing any semantic analysis.
+    // It's just triggering *other* analysis, alongside a simple loop over already-resolved info.
 
     {
         // After we have resolve union layout we have to go over the fields again to
@@ -34765,6 +34782,10 @@ pub fn resolveStructFieldTypes(
     }
     defer struct_type.clearFieldTypesWip(ip);
 
+    // can't happen earlier than this because we only want the progress node if not already resolved
+    const tracked_unit = zcu.trackUnitSema(struct_type.name.toSlice(ip), null);
+    defer tracked_unit.end(zcu);
+
     sema.structFields(struct_type) catch |err| switch (err) {
         error.AnalysisFail, error.OutOfMemory => |e| return e,
         error.ComptimeBreak, error.ComptimeReturn => unreachable,
@@ -34794,6 +34815,10 @@ pub fn resolveStructFieldInits(sema: *Sema, ty: Type) SemaError!void {
     }
     defer struct_type.clearInitsWip(ip);
 
+    // can't happen earlier than this because we only want the progress node if not already resolved
+    const tracked_unit = zcu.trackUnitSema(struct_type.name.toSlice(ip), null);
+    defer tracked_unit.end(zcu);
+
     sema.structFieldInits(struct_type) catch |err| switch (err) {
         error.AnalysisFail, error.OutOfMemory => |e| return e,
         error.ComptimeBreak, error.ComptimeReturn => unreachable,
@@ -34821,6 +34846,10 @@ pub fn resolveUnionFieldTypes(sema: *Sema, ty: Type, union_type: InternPool.Load
         .fully_resolved,
         => return,
     }
+
+    // can't happen earlier than this because we only want the progress node if not already resolved
+    const tracked_unit = zcu.trackUnitSema(union_type.name.toSlice(ip), null);
+    defer tracked_unit.end(zcu);
 
     union_type.setStatus(ip, .field_types_wip);
     errdefer union_type.setStatus(ip, .none);

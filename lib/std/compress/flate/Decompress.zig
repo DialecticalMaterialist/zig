@@ -31,6 +31,7 @@ const BlockType = enum(u2) {
     stored = 0,
     fixed = 1,
     dynamic = 2,
+    invalid = 3,
 };
 
 const State = union(enum) {
@@ -49,6 +50,7 @@ pub const Error = Container.Error || error{
     InvalidCode,
     InvalidMatch,
     WrongStoredBlockNlen,
+    InvalidBlockType,
     InvalidDynamicBlockHeader,
     ReadFailed,
     OversubscribedHuffmanTree,
@@ -71,7 +73,12 @@ const indirect_vtable: Reader.VTable = .{
     .readVec = readVec,
 };
 
+/// `input` buffer is asserted to be at least 10 bytes, or EOF before then.
+///
+/// If `buffer` is provided then asserted to have `flate.max_window_len`
+/// capacity, as well as `flate.history_len` unused capacity on every write.
 pub fn init(input: *Reader, container: Container, buffer: []u8) Decompress {
+    if (buffer.len != 0) assert(buffer.len >= flate.max_window_len);
     return .{
         .reader = .{
             .vtable = if (buffer.len == 0) &direct_vtable else &indirect_vtable,
@@ -232,6 +239,8 @@ fn decodeSymbol(self: *Decompress, decoder: anytype) !Symbol {
 }
 
 fn streamDirect(r: *Reader, w: *Writer, limit: std.Io.Limit) Reader.StreamError!usize {
+    assert(w.buffer.len >= flate.max_window_len);
+    assert(w.unusedCapacityLen() >= flate.history_len);
     const d: *Decompress = @alignCast(@fieldParentPtr("reader", r));
     return streamFallible(d, w, limit);
 }
@@ -360,6 +369,7 @@ fn streamInner(d: *Decompress, w: *Writer, limit: std.Io.Limit) (Error || Reader
 
                     continue :sw .dynamic_block;
                 },
+                .invalid => return error.InvalidBlockType,
             }
         },
         .stored_block => |remaining_len| {
@@ -1141,6 +1151,10 @@ test "puff09" {
     try testDecompress(.raw, @embedFile("testdata/fuzz/puff09.input"), "P");
 }
 
+test "invalid block type" {
+    try testFailure(.raw, &[_]u8{0b110}, error.InvalidBlockType);
+}
+
 test "bug 18966" {
     try testDecompress(
         .gzip,
@@ -1239,7 +1253,8 @@ test "zlib should not overshoot" {
 fn testFailure(container: Container, in: []const u8, expected_err: anyerror) !void {
     var reader: Reader = .fixed(in);
     var aw: Writer.Allocating = .init(testing.allocator);
-    try aw.ensureUnusedCapacity(flate.history_len);
+    aw.minimum_unused_capacity = flate.history_len;
+    try aw.ensureUnusedCapacity(flate.max_window_len);
     defer aw.deinit();
 
     var decompress: Decompress = .init(&reader, container, &.{});
@@ -1250,7 +1265,8 @@ fn testFailure(container: Container, in: []const u8, expected_err: anyerror) !vo
 fn testDecompress(container: Container, compressed: []const u8, expected_plain: []const u8) !void {
     var in: std.Io.Reader = .fixed(compressed);
     var aw: std.Io.Writer.Allocating = .init(testing.allocator);
-    try aw.ensureUnusedCapacity(flate.history_len);
+    aw.minimum_unused_capacity = flate.history_len;
+    try aw.ensureUnusedCapacity(flate.max_window_len);
     defer aw.deinit();
 
     var decompress: Decompress = .init(&in, container, &.{});

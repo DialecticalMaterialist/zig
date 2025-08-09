@@ -25,9 +25,7 @@ pub const VTable = struct {
     ///
     /// Returns the number of bytes written, which will be at minimum `0` and
     /// at most `limit`. The number returned, including zero, does not indicate
-    /// end of stream. `limit` is guaranteed to be at least as large as the
-    /// buffer capacity of `w`, a value whose minimum size is determined by the
-    /// stream implementation.
+    /// end of stream.
     ///
     /// The reader's internal logical seek position moves forward in accordance
     /// with the number of bytes returned from this function.
@@ -426,7 +424,7 @@ pub fn readVec(r: *Reader, data: [][]u8) Error!usize {
 /// Writes to `Reader.buffer` or `data`, whichever has larger capacity.
 pub fn defaultReadVec(r: *Reader, data: [][]u8) Error!usize {
     const first = data[0];
-    if (r.seek == r.end and first.len >= r.buffer.len) {
+    if (first.len >= r.buffer.len - r.end) {
         var writer: Writer = .{
             .buffer = first,
             .end = 0,

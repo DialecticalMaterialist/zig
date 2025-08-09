@@ -317,13 +317,14 @@ test "fixed buffer flush" {
 /// Calls `VTable.drain` but hides the last `preserve_len` bytes from the
 /// implementation, keeping them buffered.
 pub fn drainPreserve(w: *Writer, preserve_len: usize) Error!void {
-    const temp_end = w.end -| preserve_len;
-    const preserved = w.buffer[temp_end..w.end];
-    w.end = temp_end;
-    defer w.end += preserved.len;
+    const preserved_head = w.end -| preserve_len;
+    const preserved_tail = w.end;
+    const preserved_len = preserved_tail - preserved_head;
+    w.end = preserved_head;
+    defer w.end += preserved_len;
     assert(0 == try w.vtable.drain(w, &.{""}, 1));
-    assert(w.end <= temp_end + preserved.len);
-    @memmove(w.buffer[w.end..][0..preserved.len], preserved);
+    assert(w.end <= preserved_head + preserved_len);
+    @memmove(w.buffer[w.end..][0..preserved_len], w.buffer[preserved_head..preserved_tail]);
 }
 
 pub fn unusedCapacitySlice(w: *const Writer) []u8 {
@@ -2239,6 +2240,11 @@ pub const Discarding = struct {
         };
     }
 
+    /// Includes buffered data (no need to flush).
+    pub fn fullCount(d: *const Discarding) u64 {
+        return d.count + d.writer.end;
+    }
+
     pub fn drain(w: *Writer, data: []const []const u8, splat: usize) Error!usize {
         const d: *Discarding = @alignCast(@fieldParentPtr("writer", w));
         const slice = data[0 .. data.len - 1];
@@ -2491,6 +2497,10 @@ pub fn Hashing(comptime Hasher: type) type {
 pub const Allocating = struct {
     allocator: Allocator,
     writer: Writer,
+    /// Every call to `drain` ensures at least this amount of unused capacity
+    /// before it returns. This prevents an infinite loop in interface logic
+    /// that calls `drain`.
+    minimum_unused_capacity: usize = 1,
 
     pub fn init(allocator: Allocator) Allocating {
         return .{
@@ -2601,14 +2611,13 @@ pub const Allocating = struct {
         const gpa = a.allocator;
         const pattern = data[data.len - 1];
         const splat_len = pattern.len * splat;
+        const bump = a.minimum_unused_capacity;
         var list = a.toArrayList();
         defer setArrayList(a, list);
         const start_len = list.items.len;
-        // Even if we append no data, this function needs to ensure there is more
-        // capacity in the buffer to avoid infinite loop, hence the +1 in this loop.
         assert(data.len != 0);
         for (data) |bytes| {
-            list.ensureUnusedCapacity(gpa, bytes.len + splat_len + 1) catch return error.WriteFailed;
+            list.ensureUnusedCapacity(gpa, bytes.len + splat_len + bump) catch return error.WriteFailed;
             list.appendSliceAssumeCapacity(bytes);
         }
         if (splat == 0) {
@@ -2628,7 +2637,7 @@ pub const Allocating = struct {
         const gpa = a.allocator;
         var list = a.toArrayList();
         defer setArrayList(a, list);
-        const pos = file_reader.pos;
+        const pos = file_reader.logicalPos();
         const additional = if (file_reader.getSize()) |size| size - pos else |_| std.atomic.cache_line;
         if (additional == 0) return error.EndOfStream;
         list.ensureUnusedCapacity(gpa, limit.minInt64(additional)) catch return error.WriteFailed;
