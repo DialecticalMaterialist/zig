@@ -357,7 +357,7 @@ fn entryPoints(module: *Module) !Section {
                 }
                 try module.sections.execution_modes.emit(module.gpa, .OpExecutionMode, .{
                     .entry_point = entry_point_id,
-                    .mode = if (target.os.tag) .origin_upper_left else .origin_lower_left,
+                    .mode = if (target.os.tag == .vulkan) .origin_upper_left else .origin_lower_left,
                 });
                 switch (fragment.depth_assumption) {
                     .none => {},
